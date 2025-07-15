@@ -200,6 +200,7 @@ export const refundDeposit = functions.https.onCall(async (data, context) => {
 });
 
 // Stripe webhook handler for automatic payment processing
+// No body parsing middleware is used so Stripe can verify the raw payload.
 export const handleStripeWebhook = functions.https.onRequest(async (req, res) => {
   const endpointSecret = functions.config().stripe?.webhook_secret || process.env.STRIPE_WEBHOOK_SECRET;
   
@@ -213,7 +214,9 @@ export const handleStripeWebhook = functions.https.onRequest(async (req, res) =>
   let event: Stripe.Event;
 
   try {
-    event = stripe.webhooks.constructEvent(req.body, sig, endpointSecret);
+    // Use the raw request body to construct the Stripe event so
+    // the signature can be verified correctly.
+    event = stripe.webhooks.constructEvent(req.rawBody, sig, endpointSecret);
   } catch (err: any) {
     console.error('Webhook signature verification failed:', err.message);
     res.status(400).send(`Webhook Error: ${err.message}`);
