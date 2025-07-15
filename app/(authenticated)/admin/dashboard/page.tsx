@@ -122,26 +122,32 @@ const AdminDashboard = () => {
       const bookingSnap = await getDoc(bookingRef);
       const bookingData = bookingSnap.data();
 
-      // Update Firestore status
-      const updates: any = { 
-        status,
-        updatedAt: new Date()
-      };
-      
       if (status === 'confirmed') {
-        updates.confirmedAt = new Date();
-        
-        // If this is a paid booking, mark deposit as captured
-        if (bookingData?.totalPrice > 0) {
-          updates.depositCaptured = true;
-          updates.depositCapturedAt = new Date();
-          console.log('Marking deposit as captured for confirmed booking');
+        if (bookingData?.paymentIntentId) {
+          // Capture deposit via Cloud Function
+          const captureDeposit = httpsCallable(firebaseFunctions, 'captureDeposit');
+          const result: any = await captureDeposit({ bookingId });
+          if (!result.data.success) throw new Error('Deposit capture failed');
+        } else {
+          // Free booking - simply update status
+          await updateDoc(bookingRef, {
+            status: 'confirmed',
+            confirmedAt: new Date(),
+            updatedAt: new Date(),
+          });
         }
-      } else if (status === 'rejected') {
-        updates.rejectedAt = new Date();
+      } else {
+        const updates: any = {
+          status,
+          updatedAt: new Date(),
+        };
+
+        if (status === 'rejected') {
+          updates.rejectedAt = new Date();
+        }
+
+        await updateDoc(bookingRef, updates);
       }
-      
-      await updateDoc(bookingRef, updates);
       console.log('Booking status updated successfully in Firestore.');
     } catch (error) {
       console.error('Firestore Error: ', error);

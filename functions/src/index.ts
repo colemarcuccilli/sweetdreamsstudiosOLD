@@ -36,6 +36,7 @@ export const createPaymentIntent = functions.https.onCall(async (data, context) 
         userId: context.auth.uid,
         paymentType,
       },
+      capture_method: 'manual',
       automatic_payment_methods: {
         enabled: true,
       },

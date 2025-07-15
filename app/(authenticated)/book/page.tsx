@@ -672,15 +672,15 @@ function PaymentForm({
 
     if (error) {
       onError(error.message || 'Payment failed');
-    } else if (paymentIntent && paymentIntent.status === 'succeeded') {
-      // Create booking after successful payment
+    } else if (
+      paymentIntent &&
+      (paymentIntent.status === 'requires_capture' || paymentIntent.status === 'succeeded')
+    ) {
+      // Create booking after payment authorization
       try {
         const finalBookingData = {
           ...bookingData,
           status: 'pending_confirmation',
-          depositPaid: true,
-          depositCaptured: true,
-          depositCapturedAt: new Date(),
           paymentIntentId: paymentIntent.id,
           depositAmount: amount,
           updatedAt: new Date()

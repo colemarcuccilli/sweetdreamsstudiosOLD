@@ -21,6 +21,7 @@ export async function POST(request: NextRequest) {
       amount: Math.round(amount), // Ensure it's an integer
       currency,
       metadata: metadata || {},
+      capture_method: 'manual',
       automatic_payment_methods: {
         enabled: true,
       },
