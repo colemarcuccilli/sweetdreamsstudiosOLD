@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { db as firestore } from '@/lib/firebase';
-import { collection, onSnapshot, query, where, Timestamp, updateDoc, doc, addDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, where, Timestamp, updateDoc, doc } from 'firebase/firestore';
 import { httpsCallable } from 'firebase/functions';
 import { functions as firebaseFunctions } from '@/lib/firebase';
 import { Calendar, dateFnsLocalizer, Event as BigCalendarEvent } from 'react-big-calendar';
@@ -41,6 +41,7 @@ interface ScheduleEvent extends BigCalendarEvent {
   depositPaid?: boolean;
   finalAmount?: number;
   finalPaid?: boolean;
+  finalPaymentIntentId?: string;
   notes?: string;
   paymentHistory?: any[];
 }
@@ -279,40 +280,30 @@ function BookingDetailsModal({
         console.log('Files to upload:', sessionFiles);
       }
 
-      // If there's a remaining balance, create a checkout session for final payment
+      // If there's a remaining balance, create a final payment intent via Cloud Function
       if (remainingBalance > 0) {
         try {
-          // Create checkout session for remaining balance using Stripe extension
-          const checkoutSessionRef = await addDoc(
-            collection(firestore, 'customers', booking.userId, 'checkout_sessions'),
-            {
-              mode: 'payment',
-              amount: remainingBalance * 100, // Convert to cents
-              currency: 'usd',
-              success_url: `${window.location.origin}/profile/bookings?success=true`,
-              cancel_url: `${window.location.origin}/profile/bookings`,
-              metadata: {
-                bookingId: booking.id,
-                paymentType: 'final',
-                description: `Final payment for ${booking.serviceName} session`
-              }
-            }
-          );
+          const chargeFinal = httpsCallable(firebaseFunctions, 'chargeFinalSessionPayment');
+          const result: any = await chargeFinal({
+            bookingId: booking.id,
+            amount: remainingBalance,
+            customerEmail: booking.customerEmail,
+          });
 
-          updates.finalPaymentSessionId = checkoutSessionRef.id;
-          updates.finalPaymentStatus = 'pending';
-          
-          // Add to payment history
+          if (result.data?.success) {
+            updates.finalPaymentIntentId = result.data.paymentIntentId;
+            updates.finalPaymentStatus = 'pending';
+          }
           const paymentHistory = booking.paymentHistory || [];
           paymentHistory.push({
             type: 'final_payment_created',
             amount: remainingBalance,
             timestamp: new Date(),
-            description: `Final payment session created for $${remainingBalance}`
+            description: `Final payment intent created for $${remainingBalance}`
           });
           updates.paymentHistory = paymentHistory;
         } catch (paymentError) {
-          console.error('Error creating final payment session:', paymentError);
+          console.error('Error creating final payment:', paymentError);
           // Continue with completion even if payment setup fails
         }
       } else {

@@ -280,3 +280,47 @@ export const handleStripeWebhook = functions.https.onRequest(async (req, res) =>
     res.status(500).send('Webhook processing failed');
   }
 });
+
+// Charge final payment for a completed session (admin only)
+export const chargeFinalSessionPayment = functions.https.onCall(async (data, context) => {
+  if (!context.auth) {
+    throw new functions.https.HttpsError('unauthenticated', 'User must be authenticated');
+  }
+
+  const { bookingId, amount, customerEmail } = data;
+
+  if (!bookingId || typeof amount !== 'number') {
+    throw new functions.https.HttpsError('invalid-argument', 'bookingId and amount are required');
+  }
+
+  const userDoc = await db.collection('users').doc(context.auth.uid).get();
+  if (!userDoc.exists || !userDoc.data()?.isAdmin) {
+    throw new functions.https.HttpsError('permission-denied', 'Admin access required');
+  }
+
+  try {
+    const paymentIntent = await stripe.paymentIntents.create({
+      amount: Math.round(amount * 100),
+      currency: 'usd',
+      description: `Final payment for booking ${bookingId}`,
+      metadata: { bookingId, paymentType: 'final' },
+      automatic_payment_methods: { enabled: true },
+    });
+
+    await db.collection('bookings').doc(bookingId).update({
+      finalPaymentIntentId: paymentIntent.id,
+      finalPaymentAmount: amount,
+      finalPaymentStatus: 'pending',
+      updatedAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    if (customerEmail) {
+      console.log(`Final payment invoice ready for ${customerEmail} - PaymentIntent: ${paymentIntent.id}`);
+    }
+
+    return { success: true, paymentIntentId: paymentIntent.id };
+  } catch (error) {
+    console.error('Error charging final payment:', error);
+    throw new functions.https.HttpsError('internal', 'Failed to charge final payment');
+  }
+});
