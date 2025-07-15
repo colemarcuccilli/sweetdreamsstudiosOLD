@@ -4,7 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useRouter } from 'next/navigation';
 import { db as firestore } from '@/lib/firebase';
-import { collection, onSnapshot, query, orderBy, doc, updateDoc, Timestamp, getDoc, getDocs, addDoc, deleteDoc } from 'firebase/firestore';
+import { collection, onSnapshot, query, orderBy, doc, updateDoc, Timestamp, getDoc } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { httpsCallable } from 'firebase/functions';
 import { functions as firebaseFunctions } from '@/lib/firebase';
@@ -196,39 +196,35 @@ const AdminDashboard = () => {
         updatedAt: new Date()
       };
 
-      // If there's a remaining balance, create a checkout session for final payment
+      // If there's a remaining balance, create a final payment intent via Cloud Function
       if (remainingBalance > 0) {
-        // Create checkout session for remaining balance using Stripe extension
-        const checkoutSessionRef = await addDoc(
-          collection(firestore, 'customers', booking.userId, 'checkout_sessions'),
-          {
-            mode: 'payment',
-            amount: remainingBalance * 100, // Convert to cents
-            currency: 'usd',
-            success_url: `${window.location.origin}/profile/bookings?success=true`,
-            cancel_url: `${window.location.origin}/profile/bookings`,
-            metadata: {
-              bookingId: booking.id,
-              paymentType: 'final',
-              description: `Final payment for session - remaining balance`
-            }
-          }
-        );
+        const chargeFinal = httpsCallable(firebaseFunctions, 'chargeFinalSessionPayment');
+        try {
+          const result: any = await chargeFinal({
+            bookingId: booking.id,
+            amount: remainingBalance,
+            customerEmail: booking.userEmail,
+          });
 
-        updates.finalPaymentSessionId = checkoutSessionRef.id;
-        updates.finalPaymentStatus = 'pending';
-        
-        // Add to payment history
-        const paymentHistory = booking.paymentHistory || [];
-        paymentHistory.push({
-          type: 'final_payment_created',
-          amount: remainingBalance,
-          timestamp: new Date(),
-          description: `Final payment session created for $${remainingBalance}`
-        });
-        updates.paymentHistory = paymentHistory;
-        
-        setActionSuccess(`Session completed! Final payment of $${remainingBalance} will be charged to customer.`);
+          if (result.data?.success) {
+            updates.finalPaymentIntentId = result.data.paymentIntentId;
+            updates.finalPaymentStatus = 'pending';
+          }
+
+          const paymentHistory = booking.paymentHistory || [];
+          paymentHistory.push({
+            type: 'final_payment_created',
+            amount: remainingBalance,
+            timestamp: new Date(),
+            description: `Final payment intent created for $${remainingBalance}`
+          });
+          updates.paymentHistory = paymentHistory;
+
+          setActionSuccess(`Session completed! Final payment of $${remainingBalance} will be charged to customer.`);
+        } catch (e) {
+          console.error('Final payment error:', e);
+          setActionError('Failed to create final payment');
+        }
       } else {
         updates.finalPaid = true;
         setActionSuccess('Session completed successfully! No additional payment required.');
