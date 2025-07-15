@@ -9,19 +9,32 @@ service cloud.firestore {
       allow create: if request.auth != null && request.auth.uid == userId;
     }
 
-    // Bookings - SUPER SIMPLE - any authenticated user can do anything
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isAdmin() {
+      return isSignedIn() &&
+             get(/databases/$(database)/documents/users/$(request.auth.uid)).data.isAdmin == true;
+    }
+
+    // Bookings - users can read all and create their own
     match /bookings/{bookingId} {
-      allow read, write: if request.auth != null;
+      allow read: if isSignedIn();
+      allow create: if isSignedIn() && request.resource.data.userId == request.auth.uid;
+      allow update, delete: if isAdmin();
     }
 
-    // Services - anyone can read/write if authenticated  
+    // Services - only admins can modify
     match /services/{serviceId} {
-      allow read, write: if request.auth != null;
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
-    // Pricing Rules - anyone can read/write if authenticated
+    // Pricing Rules - only admins can modify
     match /pricingRules/{ruleId} {
-      allow read, write: if request.auth != null;
+      allow read: if isSignedIn();
+      allow write: if isAdmin();
     }
 
     // Stripe extension rules
